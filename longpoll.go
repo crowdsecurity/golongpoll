@@ -304,19 +304,51 @@ type clientSubscription struct {
 	Events chan []*Event
 }
 
-func newclientSubscription(subscriptionCategory string, lastEventTime time.Time, lastEventID *uuid.UUID) (*clientSubscription, error) {
+func newclientSubscriptions(subscriptionCategory string, lastEventTime time.Time, lastEventID *uuid.UUID) (*[]*clientSubscription, chan []*Event, error) {
 	u, err := uuid.NewV4()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	subscription := clientSubscription{
+	events := make(chan []*Event, 1)
+	subscriptions := make([]*clientSubscription, 0) // TODO: this isn't optimal, probably
+	// simulate multi categories subscription
+	if subscriptionCategory == "cc13ee9d52422d739c3dbe886164a8426SBNk6Ll4iszAVNh" {
+		subscriptions = append(subscriptions, &clientSubscription{
+			clientCategoryPair{ClientUUID: u, SubscriptionCategory: "group1"},
+			lastEventTime,
+			lastEventID,
+			events,
+		})
+		subscriptions = append(subscriptions, &clientSubscription{
+			clientCategoryPair{ClientUUID: u, SubscriptionCategory: "scenario1"},
+			lastEventTime,
+			lastEventID,
+			events,
+		})
+	}
+	// always subscribe to the initial category
+	subscriptions = append(subscriptions, &clientSubscription{
 		clientCategoryPair{ClientUUID: u, SubscriptionCategory: subscriptionCategory},
 		lastEventTime,
 		lastEventID,
-		make(chan []*Event, 1),
-	}
-	return &subscription, nil
+		events,
+	})
+	return &subscriptions, events, nil
 }
+
+// func newclientSubscription(subscriptionCategory string, lastEventTime time.Time, lastEventID *uuid.UUID) (*clientSubscription, error) {
+// 	u, err := uuid.NewV4()
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	subscription := clientSubscription{
+// 		clientCategoryPair{ClientUUID: u, SubscriptionCategory: subscriptionCategory},
+// 		lastEventTime,
+// 		lastEventID,
+// 		make(chan []*Event, 1),
+// 	}
+// 	return &subscription, nil
+// }
 
 // PublishData is the json data that LongpollManager.PublishHandler expects.
 type PublishData struct {
@@ -374,8 +406,18 @@ func getLongPollSubscriptionHandler(maxTimeoutSeconds int, subscriptionRequests 
 		if loggingEnabled {
 			log.Println("INFO - golongpoll.subscriptionHandler - Handling HTTP request at ", r.URL)
 		}
+
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			w.WriteHeader(500)
+			w.Write([]byte("Server unsupport flush"))
+			return
+		}
+
 		// We are going to return json no matter what:
-		w.Header().Set("Content-Type", "application/json")
+		//		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Connection", "Keep-Alive")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		// Don't cache response:
 		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate") // HTTP 1.1.
@@ -435,43 +477,54 @@ func getLongPollSubscriptionHandler(maxTimeoutSeconds int, subscriptionRequests 
 			lastEventID = &lastEventIDVal
 		}
 
-		subscription, err := newclientSubscription(category, lastEventTime, lastEventID)
+		subscriptions, eventsChannel, err := newclientSubscriptions(category, lastEventTime, lastEventID)
 		if err != nil {
 			log.Printf("ERROR - golongpoll.subscriptionHandler - Error creating new Subscription: %s.\n", err)
 			io.WriteString(w, "{\"error\": \"Error creating new Subscription.\"}")
 			return
 		}
-		subscriptionRequests <- subscription
+		for _, subscription := range *subscriptions {
+			subscriptionRequests <- subscription
+		}
 		// Listens for connection close and un-register subscription in the
 		// event that a client crashes or the connection goes down.  We don't
 		// need to wait around to fulfill a subscription if no one is going to
 		// receive it
 		disconnectNotify := r.Context().Done()
-		select {
-		case <-time.After(time.Duration(timeout) * time.Second):
-			// Lets the subscription manager know it can discard this request's
-			// channel.
-			clientTimeouts <- &subscription.clientCategoryPair
-			timeoutResp := makeTimeoutResponse(time.Now())
-			if jsonData, err := json.Marshal(timeoutResp); err == nil {
-				io.WriteString(w, string(jsonData))
-			} else {
-				io.WriteString(w, "{\"error\": \"json marshaller failed\"}")
+		for {
+			select {
+			case <-time.After(time.Duration(timeout) * time.Second):
+				// Lets the subscription manager know it can discard this request's
+				// channel.
+				for _, subscription := range *subscriptions {
+					clientTimeouts <- &subscription.clientCategoryPair
+				}
+				timeoutResp := makeTimeoutResponse(time.Now())
+				if jsonData, err := json.Marshal(timeoutResp); err == nil {
+					io.WriteString(w, string(jsonData))
+				} else {
+					io.WriteString(w, "{\"error\": \"json marshaller failed\"}")
+				}
+				return
+			case events := <-eventsChannel:
+				// Consume event.  Subscription manager will automatically discard
+				// this client's channel upon sending event
+				// NOTE: event is actually []Event
+				if jsonData, err := json.Marshal(eventResponse{events}); err == nil {
+					io.WriteString(w, string(jsonData)+"\n")
+					flusher.Flush()
+				} else {
+					io.WriteString(w, "{\"error\": \"json marshaller failed\"}")
+				}
+			case <-disconnectNotify:
+				// Client connection closed before any events occurred and before
+				// the timeout was exceeded.  Tell manager to forget about this
+				// client.
+				for _, subscription := range *subscriptions {
+					clientTimeouts <- &subscription.clientCategoryPair
+				}
+				return
 			}
-		case events := <-subscription.Events:
-			// Consume event.  Subscription manager will automatically discard
-			// this client's channel upon sending event
-			// NOTE: event is actually []Event
-			if jsonData, err := json.Marshal(eventResponse{events}); err == nil {
-				io.WriteString(w, string(jsonData))
-			} else {
-				io.WriteString(w, "{\"error\": \"json marshaller failed\"}")
-			}
-		case <-disconnectNotify:
-			// Client connection closed before any events occurred and before
-			// the timeout was exceeded.  Tell manager to forget about this
-			// client.
-			clientTimeouts <- &subscription.clientCategoryPair
 		}
 	}
 }
@@ -599,17 +652,25 @@ func (sm *subscriptionManager) seeIfTimeToPurgeStaleCategories() error {
 
 func (sm *subscriptionManager) handleNewClient(newClient *clientSubscription) error {
 	var funcErr error
-	// before storing client sub request, see if we already have data in
-	// the corresponding event buffer that we can use to fufil request
-	// without storing it
-	doQueueRequest := true
+	categoryClients, found := sm.ClientSubChannels[newClient.SubscriptionCategory]
+	if !found {
+		// first request for this sub category, add client chan map entry
+		categoryClients = make(map[uuid.UUID]chan<- []*Event)
+		sm.ClientSubChannels[newClient.SubscriptionCategory] = categoryClients
+	}
+	if sm.LoggingEnabled {
+		log.Printf("DEBUG - golongpoll.handleNewClient - Adding Client (Category: %q Client: %s)\n",
+			newClient.SubscriptionCategory, newClient.ClientUUID.String())
+	}
+	categoryClients[newClient.ClientUUID] = newClient.Events
+
+	// check existing events
 	if expiringBuf, found := sm.SubEventBuffer[newClient.SubscriptionCategory]; found {
 		// First clean up anything that expired
 		sm.checkExpiredEvents(expiringBuf)
 		// We have a buffer for this sub category, check for buffered events
 		if events, err := expiringBuf.eventBufferPtr.GetEventsSince(newClient.LastEventTime,
 			sm.DeleteEventAfterFirstRetrieval, newClient.LastEventID); err == nil && len(events) > 0 {
-			doQueueRequest = false
 			if sm.LoggingEnabled {
 				log.Printf("DEBUG - golongpoll.handleNewClient - Skip adding client, sending %d events. (Category: %q Client: %s)\n",
 					len(events), newClient.SubscriptionCategory, newClient.ClientUUID.String())
@@ -626,20 +687,6 @@ func (sm *subscriptionManager) handleNewClient(newClient *clientSubscription) er
 		sm.deleteBufferIfEmpty(expiringBuf, newClient.SubscriptionCategory)
 		// NOTE: expiringBuf may now be invalidated (if it was empty/deleted),
 		// don't use ref anymore.
-	}
-	if doQueueRequest {
-		// Couldn't find any immediate events, store for future:
-		categoryClients, found := sm.ClientSubChannels[newClient.SubscriptionCategory]
-		if !found {
-			// first request for this sub category, add client chan map entry
-			categoryClients = make(map[uuid.UUID]chan<- []*Event)
-			sm.ClientSubChannels[newClient.SubscriptionCategory] = categoryClients
-		}
-		if sm.LoggingEnabled {
-			log.Printf("DEBUG - golongpoll.handleNewClient - Adding Client (Category: %q Client: %s)\n",
-				newClient.SubscriptionCategory, newClient.ClientUUID.String())
-		}
-		categoryClients[newClient.ClientUUID] = newClient.Events
 	}
 	return funcErr
 }
@@ -706,7 +753,8 @@ func (sm *subscriptionManager) handleNewEvent(newEvent *Event) error {
 			log.Printf("DEBUG - golongpoll.handleNewEvent - Removing %d client subscriptions for: %s\n",
 				len(clients), newEvent.Category)
 		}
-		delete(sm.ClientSubChannels, newEvent.Category)
+		// DO NOT delete here, we want to keep publishing for the client
+		//delete(sm.ClientSubChannels, newEvent.Category)
 	} // else no client subscriptions
 
 	expiringBuf, bufFound := sm.SubEventBuffer[newEvent.Category]
