@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gofrs/uuid"
@@ -310,29 +311,17 @@ func newclientSubscriptions(subscriptionCategory string, lastEventTime time.Time
 		return nil, nil, err
 	}
 	events := make(chan []*Event, 1)
-	subscriptions := make([]*clientSubscription, 0) // TODO: this isn't optimal, probably
-	// simulate multi categories subscription
-	if subscriptionCategory == "cc13ee9d52422d739c3dbe886164a8426SBNk6Ll4iszAVNh" {
+	categories := strings.Split(subscriptionCategory, ",")
+	subscriptions := make([]*clientSubscription, 0)
+
+	for _, category := range categories {
 		subscriptions = append(subscriptions, &clientSubscription{
-			clientCategoryPair{ClientUUID: u, SubscriptionCategory: "group1"},
-			lastEventTime,
-			lastEventID,
-			events,
-		})
-		subscriptions = append(subscriptions, &clientSubscription{
-			clientCategoryPair{ClientUUID: u, SubscriptionCategory: "scenario1"},
+			clientCategoryPair{ClientUUID: u, SubscriptionCategory: category},
 			lastEventTime,
 			lastEventID,
 			events,
 		})
 	}
-	// always subscribe to the initial category
-	subscriptions = append(subscriptions, &clientSubscription{
-		clientCategoryPair{ClientUUID: u, SubscriptionCategory: subscriptionCategory},
-		lastEventTime,
-		lastEventID,
-		events,
-	})
 	return &subscriptions, events, nil
 }
 
