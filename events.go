@@ -4,8 +4,9 @@ import (
 	"container/list"
 	"errors"
 	"fmt"
-	"log"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 
 	"github.com/gofrs/uuid"
 )
@@ -89,11 +90,49 @@ func (eb *eventBuffer) QueueEvent(event *Event) error {
 	if lastElement := eb.List.Back(); lastElement != nil {
 		lastEvent, ok := lastElement.Value.(*Event)
 		if !ok {
-			return fmt.Errorf("Found non-event type in event buffer.")
+			return fmt.Errorf("found non-event type in event buffer")
 		}
 		eb.oldestEventTime = lastEvent.Timestamp
 	}
 	return nil
+}
+
+func (eb *eventBuffer) DequeueEvent(uuid uuid.UUID) (*Event, error) {
+	if eb.List.Len() == 0 {
+		return nil, nil
+	}
+	var prev *list.Element
+	oldestEventTime := eb.oldestEventTime
+	log.Tracef("dequeue: list len: %d", eb.List.Len())
+	for element := eb.List.Back(); element != nil; element = prev {
+		event, ok := element.Value.(*Event)
+		if !ok {
+			return nil, fmt.Errorf("found non-event type in event buffer")
+		}
+		if event.Timestamp < oldestEventTime {
+			oldestEventTime = event.Timestamp
+		}
+		if event.ID == uuid {
+			if element == eb.List.Back() {
+				//If we're removing the last element (the oldest), update our oldestEventTime
+				if element.Prev() == nil {
+					log.Debugf("dequeue: only one element in list, setting oldestEventTime to 0")
+					eb.oldestEventTime = 0
+				} else {
+					prev, ok := element.Prev().Value.(*Event)
+					if !ok {
+						return nil, fmt.Errorf("found non-event type in event buffer")
+					}
+					log.Debugf("dequeue: setting oldestEventTime to %d", prev.Timestamp)
+					eb.oldestEventTime = prev.Timestamp
+				}
+			}
+			log.Debugf("dequeue: removing event: %s", event.ID)
+			eb.List.Remove(element)
+			return event, nil
+		}
+	}
+	return nil, nil
 }
 
 // GetEventsSnce will return all of the Events in our buffer that occurred after
