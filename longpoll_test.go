@@ -14,11 +14,23 @@ import (
 	"github.com/gofrs/uuid"
 )
 
+func getUUID() uuid.UUID {
+	id, _ := uuid.NewV4()
+	return id
+}
+
+func getEvt(category string, data string) *Event {
+	return &Event{
+		Category:  category,
+		Data:      data,
+		ID:        getUUID(),
+		Timestamp: time.Now().UnixMilli(),
+	}
+}
+
 //gocyclo:ignore
 func Test_LongpollManager_Publish(t *testing.T) {
-	manager, err := StartLongpoll(Options{
-		LoggingEnabled: true,
-	})
+	manager, err := StartLongpoll(Options{})
 	// Confirm the create call worked, and our manager has the expected values
 	if err != nil {
 		t.Errorf("Failed to create default LongpollManager.  Error was: %q", err)
@@ -31,7 +43,7 @@ func Test_LongpollManager_Publish(t *testing.T) {
 		t.Errorf("Expected sub manager's event map to be initially empty. Instead len: %d",
 			len(manager.subManager.SubEventBuffer))
 	}
-	err = manager.Publish("fruits", "apple")
+	err = manager.Publish(getEvt("fruits", "apple"))
 	if err != nil {
 		t.Errorf("Unexpected error publishing event: %q", err)
 	}
@@ -72,11 +84,12 @@ func Test_LongpollManager_Publish(t *testing.T) {
 	}
 
 	// Publish two more events
-	err = manager.Publish("veggies", "potato")
+	err = manager.Publish(getEvt("veggies", "potato"))
 	if err != nil {
 		t.Errorf("Unexpected error publishing event: %q", err)
 	}
-	err = manager.Publish("fruits", "orange")
+
+	err = manager.Publish(getEvt("fruits", "orange"))
 	if err != nil {
 		t.Errorf("Unexpected error publishing event: %q", err)
 	}
@@ -120,7 +133,6 @@ func Test_LongpollManager_Publish(t *testing.T) {
 //gocyclo:ignore
 func Test_LongpollManager_Publish_MaxBufferSize(t *testing.T) {
 	manager, _ := StartLongpoll(Options{
-		LoggingEnabled:     true,
 		MaxEventBufferSize: 2,
 	})
 
@@ -128,11 +140,13 @@ func Test_LongpollManager_Publish_MaxBufferSize(t *testing.T) {
 		t.Errorf("Expected sub manager's event map to be initially empty. Instead len: %d",
 			len(manager.subManager.SubEventBuffer))
 	}
-	err := manager.Publish("fruits", "apple")
+
+	err := manager.Publish(getEvt("fruits", "apple"))
 	if err != nil {
 		t.Errorf("Unexpected error publishing event: %q", err)
 	}
-	err = manager.Publish("fruits", "banana")
+
+	err = manager.Publish(getEvt("fruits", "banana"))
 	if err != nil {
 		t.Errorf("Unexpected error publishing event: %q", err)
 	}
@@ -170,7 +184,7 @@ func Test_LongpollManager_Publish_MaxBufferSize(t *testing.T) {
 
 	// Now try and publish another event on the same fruit category,
 	// confirm that it works, but the oldest fruit is no longer in buffer
-	err = manager.Publish("fruits", "pear")
+	err = manager.Publish(getEvt("fruits", "pear"))
 	if err != nil {
 		t.Errorf("Unexpected error publishing event: %q", err)
 	}
@@ -197,7 +211,7 @@ func Test_LongpollManager_Publish_MaxBufferSize(t *testing.T) {
 	}
 
 	// Now confirm publishing on a different category still works
-	err = manager.Publish("veggies", "potato")
+	err = manager.Publish(getEvt("fruits", "potato"))
 	if err != nil {
 		t.Errorf("Unexpected error publishing event: %q", err)
 	}
@@ -219,15 +233,13 @@ func Test_LongpollManager_Publish_MaxBufferSize(t *testing.T) {
 }
 
 func Test_LongpollManager_Publish_InvalidArgs(t *testing.T) {
-	manager, err := StartLongpoll(Options{
-		LoggingEnabled: true,
-	})
+	manager, err := StartLongpoll(Options{})
 	// Confirm the create call worked, and our manager has the expected values
 	if err != nil {
 		t.Errorf("Failed to create default LongpollManager.  Error was: %q", err)
 	}
 	// You must provide a category:
-	err = manager.Publish("", "apple")
+	err = manager.Publish(getEvt("", "apple"))
 	if err == nil {
 		t.Errorf("Expected calls to Publish with blank category would fail.")
 	}
@@ -237,22 +249,22 @@ func Test_LongpollManager_Publish_InvalidArgs(t *testing.T) {
 	for i := 0; i < 1024; i++ {
 		tooLong += "a"
 	}
-	err = manager.Publish(tooLong, "apple")
+
+	err = manager.Publish(getEvt(tooLong, "apple"))
 	if err != nil {
 		t.Errorf("Expected calls to Publish with 1024 len category not to fail, but got: %q.", err)
 	}
 	// But now that we're at 1025, we're boned.
 	tooLong += "a"
-	err = manager.Publish(tooLong, "apple")
+
+	err = manager.Publish(getEvt(tooLong, "apple"))
 	if err == nil {
 		t.Errorf("Expected calls to Publish with blank category would fail.")
 	}
 }
 
 func Test_LongpollManager_Shutdown(t *testing.T) {
-	manager, err := StartLongpoll(Options{
-		LoggingEnabled: true,
-	})
+	manager, err := StartLongpoll(Options{})
 	if err != nil {
 		t.Errorf("Failed to create default LongpollManager.  Error was: %q", err)
 	}
@@ -270,37 +282,38 @@ func Test_LongpollManager_Shutdown(t *testing.T) {
 }
 
 func Test_LongpollManager_newclientSubscription(t *testing.T) {
+	//FIXME: probably should do something with the chan ?
 	subTime := time.Date(2015, 11, 7, 11, 33, 4, 0, time.UTC)
-	sub, err := newclientSubscription("colors", subTime, nil)
+	sub, _, err := newclientSubscriptions("colors", subTime, nil)
 	if err != nil {
 		t.Errorf("Unexpected error when creating new client subscription: %q", err)
 	}
-	if sub.clientCategoryPair.SubscriptionCategory != "colors" {
+	if (*sub)[0].clientCategoryPair.SubscriptionCategory != "colors" {
 		t.Errorf("Unexpected sub category, expected: %q. got: %q", "colors",
-			sub.clientCategoryPair.SubscriptionCategory)
+			(*sub)[0].clientCategoryPair.SubscriptionCategory)
 	}
-	if sub.LastEventTime != subTime {
+	if (*sub)[0].LastEventTime != subTime {
 		t.Errorf("Unexpected sub last event time, expected: %q. got: %q", subTime,
-			sub.LastEventTime)
+			(*sub)[0].LastEventTime)
 	}
-	if cap(sub.Events) != 1 {
+	if cap((*sub)[0].Events) != 1 {
 		t.Errorf("Unexpected event channel capacity. expected: %q. got: %q", 1,
-			cap(sub.Events))
+			cap((*sub)[0].Events))
 	}
 
 	u, _ := uuid.NewV4()
-	sub, err = newclientSubscription("news", subTime, &u)
+	sub, _, err = newclientSubscriptions("news", subTime, &u)
 
 	if err != nil {
 		t.Errorf("Unexpected error when creating new client subscription: %q", err)
 	}
-	if sub.clientCategoryPair.SubscriptionCategory != "news" {
+	if (*sub)[0].clientCategoryPair.SubscriptionCategory != "news" {
 		t.Errorf("Unexpected sub category, expected: %q. got: %q", "news",
-			sub.clientCategoryPair.SubscriptionCategory)
+			(*sub)[0].clientCategoryPair.SubscriptionCategory)
 	}
-	if sub.LastEventID != &u {
+	if (*sub)[0].LastEventID != &u {
 		t.Errorf("Unexpected sub last event time, expected: %q. got: %q", u,
-			sub.LastEventID)
+			(*sub)[0].LastEventID)
 	}
 }
 
@@ -311,7 +324,6 @@ func ajaxHandler(handlerFunc func(w http.ResponseWriter, r *http.Request)) http.
 //gocyclo:ignore
 func Test_LongpollManager_WebClient_InvalidRequests(t *testing.T) {
 	manager, _ := StartLongpoll(Options{
-		LoggingEnabled:     true,
 		MaxEventBufferSize: 100,
 	})
 	subscriptionHandler := ajaxHandler(manager.SubscriptionHandler)
@@ -416,7 +428,6 @@ func Test_LongpollManager_WebClient_InvalidRequests(t *testing.T) {
 
 func Test_LongpollManager_WebClient_NoEventsSoTimeout(t *testing.T) {
 	manager, _ := StartLongpoll(Options{
-		LoggingEnabled:     true,
 		MaxEventBufferSize: 100,
 	})
 	subscriptionHandler := ajaxHandler(manager.SubscriptionHandler)
@@ -450,7 +461,6 @@ func Test_LongpollManager_WebClient_NoEventsSoTimeout(t *testing.T) {
 
 func Test_LongpollManager_WebClient_Disconnect_RemoveClientSub(t *testing.T) {
 	manager, _ := StartLongpoll(Options{
-		LoggingEnabled:     true,
 		MaxEventBufferSize: 100,
 	})
 	subscriptionHandler := ajaxHandler(manager.SubscriptionHandler)
@@ -510,7 +520,6 @@ func Test_LongpollManager_WebClient_Disconnect_RemoveClientSub(t *testing.T) {
 
 func Test_LongpollManager_WebClient_Disconnect_TerminateHttp(t *testing.T) {
 	manager, _ := StartLongpoll(Options{
-		LoggingEnabled:     true,
 		MaxEventBufferSize: 100,
 	})
 	testChannel := make(chan int, 2)
@@ -569,7 +578,6 @@ func Test_LongpollManager_WebClient_Disconnect_TerminateHttp(t *testing.T) {
 //gocyclo:ignore
 func Test_LongpollManager_WebClient_HasEvents(t *testing.T) {
 	manager, _ := StartLongpoll(Options{
-		LoggingEnabled:     true,
 		MaxEventBufferSize: 100,
 	})
 	subscriptionHandler := ajaxHandler(manager.SubscriptionHandler)
@@ -586,9 +594,9 @@ func Test_LongpollManager_WebClient_HasEvents(t *testing.T) {
 	startTime := time.Now()
 	go func() {
 		time.Sleep(1500 * time.Millisecond)
-		manager.Publish("fruits", "peach")
+		manager.Publish(getEvt("fruits", "peach"))
 		time.Sleep(1000 * time.Millisecond)
-		manager.Publish("veggies", "corn")
+		manager.Publish(getEvt("veggies", "corn"))
 	}()
 	subscriptionHandler.ServeHTTP(w, req)
 
@@ -656,7 +664,8 @@ func Test_LongpollManager_WebClient_HasEvents(t *testing.T) {
 	}
 
 	firstEventTime := (eventResponse.Events)[0].Timestamp
-	manager.Publish("veggies", "carrot")
+
+	manager.Publish(getEvt("veggies", "carrot"))
 	time.Sleep(50 * time.Millisecond) // allow yield for goroutine channel reads
 
 	// Now ask for any events since our first one, and confirm we get the second
@@ -712,7 +721,6 @@ func Test_LongpollManager_WebClient_HasBufferedEvents(t *testing.T) {
 	// Of course, clients only see this if they request events with a
 	// 'since_time' argument of a time earlier than the events occurred.
 	manager, _ := StartLongpoll(Options{
-		LoggingEnabled:     true,
 		MaxEventBufferSize: 100,
 	})
 
@@ -720,9 +728,10 @@ func Test_LongpollManager_WebClient_HasBufferedEvents(t *testing.T) {
 
 	startTime := time.Now()
 	time.Sleep(500 * time.Millisecond)
-	manager.Publish("veggies", "broccoli")
+	manager.Publish(getEvt("veggies", "broccoli"))
 	time.Sleep(500 * time.Millisecond)
-	manager.Publish("veggies", "corn")
+
+	manager.Publish(getEvt("veggies", "corn"))
 	time.Sleep(500 * time.Millisecond)
 
 	// This request clearly takes place after the two events were published.
@@ -777,7 +786,6 @@ func Test_LongpollManager_makeTimeoutResponse(t *testing.T) {
 func Test_LongpollManager_StartLongpoll_Options(t *testing.T) {
 	// Error cases due to invalid options:
 	if _, err := StartLongpoll(Options{
-		LoggingEnabled:            true,
 		MaxLongpollTimeoutSeconds: 110,
 		MaxEventBufferSize:        -1,
 		EventTimeToLiveSeconds:    1,
@@ -785,7 +793,6 @@ func Test_LongpollManager_StartLongpoll_Options(t *testing.T) {
 		t.Errorf("Expected error when passing MaxEventBufferSize that was < 0")
 	}
 	if _, err := StartLongpoll(Options{
-		LoggingEnabled:            true,
 		MaxLongpollTimeoutSeconds: -1,
 		MaxEventBufferSize:        100,
 		EventTimeToLiveSeconds:    1,
@@ -793,7 +800,6 @@ func Test_LongpollManager_StartLongpoll_Options(t *testing.T) {
 		t.Errorf("Expected error when passing MaxLongpollTimeoutSeconds that was < 0")
 	}
 	if _, err := StartLongpoll(Options{
-		LoggingEnabled:            true,
 		MaxLongpollTimeoutSeconds: 110,
 		MaxEventBufferSize:        100,
 		EventTimeToLiveSeconds:    -1,
@@ -803,7 +809,6 @@ func Test_LongpollManager_StartLongpoll_Options(t *testing.T) {
 	// Confirm valid options work
 	// actual TTL
 	if manager, err := StartLongpoll(Options{
-		LoggingEnabled:            true,
 		MaxLongpollTimeoutSeconds: 110,
 		MaxEventBufferSize:        100,
 		EventTimeToLiveSeconds:    30,
@@ -815,7 +820,6 @@ func Test_LongpollManager_StartLongpoll_Options(t *testing.T) {
 
 	// Forever
 	if manager, err := StartLongpoll(Options{
-		LoggingEnabled:            true,
 		MaxLongpollTimeoutSeconds: 110,
 		MaxEventBufferSize:        100,
 		EventTimeToLiveSeconds:    forever,
@@ -826,7 +830,6 @@ func Test_LongpollManager_StartLongpoll_Options(t *testing.T) {
 	}
 	// Confirm zero TTL converts to forever
 	if manager, err := StartLongpoll(Options{
-		LoggingEnabled:            true,
 		MaxLongpollTimeoutSeconds: 110,
 		MaxEventBufferSize:        100,
 		EventTimeToLiveSeconds:    0,
@@ -842,7 +845,6 @@ func Test_LongpollManager_StartLongpoll_Options(t *testing.T) {
 	// Confirm defaults for options set to zero value
 	// either explicitly like so:
 	if manager, err := StartLongpoll(Options{
-		LoggingEnabled:                 false,
 		MaxLongpollTimeoutSeconds:      0,
 		MaxEventBufferSize:             0,
 		EventTimeToLiveSeconds:         0,
@@ -861,10 +863,6 @@ func Test_LongpollManager_StartLongpoll_Options(t *testing.T) {
 		if manager.subManager.MaxEventBufferSize != 250 {
 			t.Errorf("Expected default of 250 when MaxEventBufferSize is 0.  instead: %d",
 				manager.subManager.MaxEventBufferSize)
-		}
-		if manager.subManager.LoggingEnabled != false {
-			t.Errorf("Expected default of false when LoggingEnabled is left out.  instead: %t",
-				manager.subManager.LoggingEnabled)
 		}
 		if manager.subManager.DeleteEventAfterFirstRetrieval != false {
 			t.Errorf("Expected default of false when DeleteEventAfterFirstRetrieval is left out.  instead: %t",
@@ -889,10 +887,6 @@ func Test_LongpollManager_StartLongpoll_Options(t *testing.T) {
 			t.Errorf("Expected default of 250 when MaxEventBufferSize is 0.  instead: %d",
 				manager.subManager.MaxEventBufferSize)
 		}
-		if manager.subManager.LoggingEnabled != false {
-			t.Errorf("Expected default of false when LoggingEnabled is left out.  instead: %t",
-				manager.subManager.LoggingEnabled)
-		}
 		if manager.subManager.DeleteEventAfterFirstRetrieval != false {
 			t.Errorf("Expected default of false when DeleteEventAfterFirstRetrieval is left out.  instead: %t",
 				manager.subManager.DeleteEventAfterFirstRetrieval)
@@ -904,7 +898,6 @@ func Test_LongpollManager_StartLongpoll_Options(t *testing.T) {
 //gocyclo:ignore
 func Test_LongpollManager_EventExpiration(t *testing.T) {
 	manager, _ := StartLongpoll(Options{
-		LoggingEnabled:            true,
 		MaxLongpollTimeoutSeconds: 110,
 		MaxEventBufferSize:        100,
 		EventTimeToLiveSeconds:    1,
@@ -917,11 +910,12 @@ func Test_LongpollManager_EventExpiration(t *testing.T) {
 	if sm.bufferPriorityQueue.Len() != 0 {
 		t.Errorf("Unexpected heap size.  was: %d, expected: %d", sm.bufferPriorityQueue.Len(), 0)
 	}
-	manager.Publish("fruit", "apple")
+
+	manager.Publish(getEvt("fruit", "apple"))
 	time.Sleep(10 * time.Millisecond)
-	manager.Publish("veggie", "corn")
+	manager.Publish(getEvt("veggie", "corn"))
 	time.Sleep(750 * time.Millisecond)
-	manager.Publish("fruit", "orange")
+	manager.Publish(getEvt("fruit", "orange"))
 	// Allow sub manager's goroutine time to pull from channel.
 	// This sleep should cause us to yield and let the other goroutine run
 	time.Sleep(50 * time.Millisecond)
@@ -994,7 +988,7 @@ func Test_LongpollManager_EventExpiration(t *testing.T) {
 	}
 	// Force the fruit event to be expired out by introducing activity on the
 	// fruit category.  (In this case, a new event)
-	manager.Publish("fruit", "pear")
+	manager.Publish(getEvt("fruit", "pear"))
 	// Allow sub manager's goroutine time to pull from channel.
 	// This sleep should cause us to yield and let the other goroutine run
 	time.Sleep(50 * time.Millisecond)
@@ -1129,6 +1123,7 @@ func Test_LongpollManager_EventExpiration(t *testing.T) {
 }
 
 // Shared by multiple tests with manager configured different ways:
+//
 //gocyclo:ignore
 func deleteOnFetchTest(manager *LongpollManager, t *testing.T) {
 	sm := manager.subManager
@@ -1139,13 +1134,13 @@ func deleteOnFetchTest(manager *LongpollManager, t *testing.T) {
 	if sm.EventTimeToLiveSeconds != forever && sm.bufferPriorityQueue.Len() != 0 {
 		t.Errorf("Unexpected heap size.  was: %d, expected: %d", sm.bufferPriorityQueue.Len(), 0)
 	}
-	manager.Publish("fruit", "apple")
+	manager.Publish(getEvt("fruit", "apple"))
 	time.Sleep(10 * time.Millisecond)
-	manager.Publish("veggie", "corn")
+	manager.Publish(getEvt("veggie", "corn"))
 	time.Sleep(1150 * time.Millisecond)
-	manager.Publish("fruit", "orange")
+	manager.Publish(getEvt("fruit", "orange"))
 	time.Sleep(10 * time.Millisecond)
-	manager.Publish("veggie", "carrot")
+	manager.Publish(getEvt("veggie", "carrot"))
 	// small wait so yield occurs and other goroutine gets a chance
 	time.Sleep(50 * time.Millisecond)
 	// Confirm expected state:
@@ -1311,7 +1306,6 @@ func deleteOnFetchTest(manager *LongpollManager, t *testing.T) {
 
 func Test_LongpollManager_DeleteOnFetch(t *testing.T) {
 	manager, _ := StartLongpoll(Options{
-		LoggingEnabled:                 true,
 		MaxLongpollTimeoutSeconds:      110,
 		MaxEventBufferSize:             100,
 		EventTimeToLiveSeconds:         60,
@@ -1322,7 +1316,6 @@ func Test_LongpollManager_DeleteOnFetch(t *testing.T) {
 
 func Test_LongpollManager_DeleteOnFetch_ForeverTTL(t *testing.T) {
 	manager, _ := StartLongpoll(Options{
-		LoggingEnabled:                 true,
 		MaxLongpollTimeoutSeconds:      110,
 		MaxEventBufferSize:             100,
 		EventTimeToLiveSeconds:         forever,
@@ -1336,7 +1329,6 @@ func Test_LongpollManager_DeleteOnFetch_SkipBuffering(t *testing.T) {
 	// confirm that the event was received by the client and never buffered
 	// on the server.
 	manager, _ := StartLongpoll(Options{
-		LoggingEnabled:                 true,
 		MaxLongpollTimeoutSeconds:      110,
 		MaxEventBufferSize:             100,
 		EventTimeToLiveSeconds:         60 * 10,
@@ -1364,7 +1356,7 @@ func Test_LongpollManager_DeleteOnFetch_SkipBuffering(t *testing.T) {
 	// we'd default to now and skip those events.
 	go func() {
 		time.Sleep(1500 * time.Millisecond)
-		manager.Publish("fruit", "peach")
+		manager.Publish(getEvt("fruit", "peach"))
 	}()
 	subscriptionHandler.ServeHTTP(w, req)
 	// Confirm we got the correct event
@@ -1400,7 +1392,6 @@ func Test_LongpollManager_PurgingOldCategories(t *testing.T) {
 	// Confirm that old categories get removed by purge.
 	// After any activity we check to see if it's time to call purge.
 	manager, _ := StartLongpoll(Options{
-		LoggingEnabled:            true,
 		MaxLongpollTimeoutSeconds: 110,
 		MaxEventBufferSize:        100,
 		EventTimeToLiveSeconds:    1,
@@ -1414,9 +1405,9 @@ func Test_LongpollManager_PurgingOldCategories(t *testing.T) {
 	if sm.bufferPriorityQueue.Len() != 0 {
 		t.Errorf("Unexpected heap size.  was: %d, expected: %d", sm.bufferPriorityQueue.Len(), 0)
 	}
-	manager.Publish("fruit", "apple")
+	manager.Publish(getEvt("fruit", "apple"))
 	time.Sleep(10 * time.Millisecond)
-	manager.Publish("fruit", "orange")
+	manager.Publish(getEvt("fruit", "orange"))
 	time.Sleep(2000 * time.Millisecond)
 	// It's now been over 2s since both fruit events published, and since our
 	// TTL setting is 1s, these are both expired.
@@ -1441,7 +1432,7 @@ func Test_LongpollManager_PurgingOldCategories(t *testing.T) {
 
 	// Publish an event which will force us to check if elapsed time is greater
 	// than purge period and kick off a purge.
-	manager.Publish("veggie", "corn")
+	manager.Publish(getEvt("veggie", "corn"))
 	time.Sleep(50 * time.Millisecond)
 
 	// Confirm fruit events were destroyed
@@ -1468,7 +1459,6 @@ func Test_LongpollManager_PurgingOldCategories_Inactivity(t *testing.T) {
 	// activity going on.  This purge is accomplished via the periodic
 	// check regardless of activity.
 	manager, _ := StartLongpoll(Options{
-		LoggingEnabled:            true,
 		MaxLongpollTimeoutSeconds: 110,
 		MaxEventBufferSize:        100,
 		EventTimeToLiveSeconds:    1,
@@ -1482,9 +1472,9 @@ func Test_LongpollManager_PurgingOldCategories_Inactivity(t *testing.T) {
 	if sm.bufferPriorityQueue.Len() != 0 {
 		t.Errorf("Unexpected heap size.  was: %d, expected: %d", sm.bufferPriorityQueue.Len(), 0)
 	}
-	manager.Publish("fruit", "apple")
+	manager.Publish(getEvt("fruit", "apple"))
 	time.Sleep(10 * time.Millisecond)
-	manager.Publish("fruit", "orange")
+	manager.Publish(getEvt("fruit", "orange"))
 	time.Sleep(2000 * time.Millisecond)
 	// It's now been over 2s since both fruit events published, and since our
 	// TTL setting is 1s, these are both expired.
@@ -1523,14 +1513,13 @@ func Test_LongpollManager_PurgingOldCategories_Inactivity(t *testing.T) {
 	}
 }
 
-//gocyclo:ignore
 // Tests the bug from issue #19 where clients see only the first of multiple events
 // published within the same millisecond. The fix for this involves adding an event ID
 // field and including the last seen id in the request to use in addition to since_time.
+//
+//gocyclo:ignore
 func Test_MultipleConsecutivePublishedEvents(t *testing.T) {
-	manager, _ := StartLongpoll(Options{
-		LoggingEnabled: true,
-	})
+	manager, _ := StartLongpoll(Options{})
 
 	subscriptionHandler := ajaxHandler(manager.SubscriptionHandler)
 
@@ -1551,11 +1540,11 @@ func Test_MultipleConsecutivePublishedEvents(t *testing.T) {
 	// Also publish a 4th event after a delay and make sure we can get that data too.
 	go func() {
 		time.Sleep(1500 * time.Millisecond)
-		manager.Publish("beer", "High Life")
-		manager.Publish("beer", "Lionshead")
-		manager.Publish("beer", "Miller Genuine Draft")
+		manager.Publish(getEvt("beer", "High Life"))
+		manager.Publish(getEvt("beer", "Lionshead"))
+		manager.Publish(getEvt("beer", "Miller Genuine Draft"))
 		time.Sleep(1500 * time.Millisecond)
-		manager.Publish("beer", "Yuengling")
+		manager.Publish(getEvt("beer", "Yuengling"))
 	}()
 	subscriptionHandler.ServeHTTP(w, req)
 
@@ -1671,8 +1660,8 @@ func Test_WithFilePersistorAddOn(t *testing.T) {
 		t.Fatalf("Failed to create manager: %q", err)
 	}
 
-	manager.Publish("food", "eggs")
-	manager.Publish("food", "waffles")
+	manager.Publish(getEvt("food", "eggs"))
+	manager.Publish(getEvt("food", "waffles"))
 	time.Sleep(10 * time.Millisecond)
 	manager.Shutdown()
 	time.Sleep(10 * time.Millisecond)
@@ -1730,7 +1719,6 @@ func Test_WithFilePersistorAddOn(t *testing.T) {
 
 func Test_LongpollManager_PublishHandler(t *testing.T) {
 	manager, _ := StartLongpoll(Options{
-		LoggingEnabled:     true,
 		MaxEventBufferSize: 100,
 	})
 

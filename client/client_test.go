@@ -10,13 +10,26 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofrs/uuid"
 	"github.com/jcuga/golongpoll"
 )
 
+func getUUID() uuid.UUID {
+	id, _ := uuid.NewV4()
+	return id
+}
+
+func getEvt(category string, data string) *golongpoll.Event {
+	return &golongpoll.Event{
+		Category:  category,
+		Data:      data,
+		ID:        getUUID(),
+		Timestamp: time.Now().UnixMilli(),
+	}
+}
+
 func testEventsManager() *golongpoll.LongpollManager {
-	eventsManager, err := golongpoll.StartLongpoll(golongpoll.Options{
-		LoggingEnabled: true,
-	})
+	eventsManager, err := golongpoll.StartLongpoll(golongpoll.Options{})
 	if err != nil {
 		fmt.Println("Failed to create manager: ", err)
 	}
@@ -104,7 +117,7 @@ func TestClient_Events(t *testing.T) {
 	// the first one when they share the same publish timestamp milliseconds.
 	// The loop below publishes 4 in a row without delay.
 	for num, result := range expectedResults {
-		manager.Publish(category, result)
+		manager.Publish(getEvt(category, result))
 
 		if num == 3 {
 			// Force client to encounter a poll timeout response.
@@ -137,7 +150,7 @@ func TestClient_Events(t *testing.T) {
 
 	// We'll stop the client, and make sure it doesn't handle any events anymore
 	c.Stop()
-	manager.Publish(category, "testNope")
+	manager.Publish(getEvt(category, "testNope"))
 
 	select {
 	case e, ok := <-events:
@@ -172,7 +185,7 @@ func TestClient_PastEvents(t *testing.T) {
 	// Publish events before client starts
 	expectedResults := []string{"test1", "test2", "test3"}
 	for _, result := range expectedResults {
-		manager.Publish(category, result)
+		manager.Publish(getEvt(category, result))
 		time.Sleep(time.Duration(1) * time.Second)
 	}
 
@@ -234,7 +247,7 @@ func TestClient_HttpBasicAuthentication(t *testing.T) {
 
 	events := c.Start(time.Now())
 
-	manager.Publish(category, "test")
+	manager.Publish(getEvt(category, "test"))
 
 	select {
 	case e, ok := <-events:
@@ -273,7 +286,7 @@ func TestClient_HttpBasicAuthentication(t *testing.T) {
 	events = c.Start(time.Now())
 	defer c.Stop()
 
-	manager.Publish(category, "test")
+	manager.Publish(getEvt(category, "test"))
 
 	select {
 	case e, ok := <-events:
@@ -371,7 +384,7 @@ func TestClient_OnfailureServer404(t *testing.T) {
 		t.Fatalf("Error creating client: %v", err)
 	}
 
-	manager.Publish(category, "shouldNeverSeeThis")
+	manager.Publish(getEvt(category, "shouldNeverSeeThis"))
 	time.Sleep(100 * time.Millisecond)
 	onFailureTestCase(t, c)
 }
