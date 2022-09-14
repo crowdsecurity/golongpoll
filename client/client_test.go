@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/crowdsecurity/golongpoll"
 	"github.com/gofrs/uuid"
-	"github.com/jcuga/golongpoll"
 )
 
 func getUUID() uuid.UUID {
@@ -42,7 +42,6 @@ func testServer() (url.URL, *golongpoll.LongpollManager) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/events", eventsManager.SubscriptionHandler)
-	mux.HandleFunc("/publish", eventsManager.PublishHandler)
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -431,11 +430,8 @@ func TestClient_ExtraHeaders(t *testing.T) {
 	u, manager := testHeadersServer(t)
 	defer manager.Shutdown()
 
-	pubUrl, _ := url.Parse(strings.Replace(u.String(), "events", "publish", 1))
-
 	opts := ClientOptions{
 		SubscribeUrl:         u,
-		PublishUrl:           *pubUrl,
 		Category:             category,
 		PollTimeoutSeconds:   1,
 		ReattemptWaitSeconds: 1,
@@ -500,21 +496,6 @@ func testHeadersServer(t *testing.T) (url.URL, *golongpoll.LongpollManager) {
 		eventsManager.SubscriptionHandler(w, r)
 	})
 
-	mux.HandleFunc("/publish", func(w http.ResponseWriter, r *http.Request) {
-
-		val := r.Header.Get("howdy")
-		if val != "doody" {
-			t.Errorf("Unexpected/missing header value. Expected: 'dooty', got: %q", val)
-		}
-
-		val = r.Header.Get("hi")
-		if val != "MOM" {
-			t.Errorf("Unexpected/missing header value. Expected: 'MOM', got: %q", val)
-		}
-
-		eventsManager.PublishHandler(w, r)
-	})
-
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		panic(fmt.Sprintf("Failed to listen on address, error: %v", err))
@@ -535,7 +516,6 @@ func testHeadersServer(t *testing.T) (url.URL, *golongpoll.LongpollManager) {
 
 func TestClient_NewClientInvalidOptions(t *testing.T) {
 	subUrl, _ := url.Parse("http://127.0.0.1:8080/events")
-	pubUrl, _ := url.Parse("http://127.0.0.1:8080/publish")
 
 	// First up, need at least one of: sub/pub purl
 	c, err := NewClient(ClientOptions{
@@ -555,7 +535,6 @@ func TestClient_NewClientInvalidOptions(t *testing.T) {
 	// Need to supply a non-empty category
 	c, err = NewClient(ClientOptions{
 		SubscribeUrl:         *subUrl,
-		PublishUrl:           *pubUrl,
 		Category:             "",
 		PollTimeoutSeconds:   1,
 		ReattemptWaitSeconds: 1,

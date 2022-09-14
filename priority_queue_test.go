@@ -2,7 +2,6 @@ package golongpoll
 
 import (
 	"container/heap"
-	"container/list"
 	"testing"
 	"time"
 )
@@ -16,7 +15,7 @@ func Test_priorityQueue_Len(t *testing.T) {
 	// add an item
 	nowMs := timeToEpochMilliseconds(time.Now())
 	buf := &eventBuffer{
-		list.New(),
+		make([]*Event, 0),
 		100,
 		nowMs,
 	}
@@ -32,7 +31,7 @@ func Test_priorityQueue_Len(t *testing.T) {
 	}
 	// add another
 	buf2 := &eventBuffer{
-		list.New(),
+		make([]*Event, 0),
 		100,
 		nowMs,
 	}
@@ -70,7 +69,7 @@ func Test_priorityQueue(t *testing.T) {
 	}
 
 	buf1 := &eventBuffer{
-		list.New(),
+		make([]*Event, 0),
 		100,
 		nowMs,
 	}
@@ -90,7 +89,7 @@ func Test_priorityQueue(t *testing.T) {
 	}
 
 	buf2 := &eventBuffer{
-		list.New(),
+		make([]*Event, 0),
 		100,
 		nowMs,
 	}
@@ -110,7 +109,7 @@ func Test_priorityQueue(t *testing.T) {
 	}
 
 	buf3 := &eventBuffer{
-		list.New(),
+		make([]*Event, 0),
 		100,
 		nowMs,
 	}
@@ -130,7 +129,7 @@ func Test_priorityQueue(t *testing.T) {
 	}
 
 	buf4 := &eventBuffer{
-		list.New(),
+		make([]*Event, 0),
 		100,
 		nowMs,
 	}

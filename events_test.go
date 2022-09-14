@@ -1,7 +1,6 @@
 package golongpoll
 
 import (
-	"container/list"
 	"fmt"
 	"testing"
 	"time"
@@ -10,7 +9,7 @@ import (
 func Test_eventBuffer_QueueEvent(t *testing.T) {
 	testStart := time.Now()
 	buffer := eventBuffer{
-		list.New(),
+		make([]*Event, 0),
 		10, // max buffer size
 		timeToEpochMilliseconds(testStart),
 	}
@@ -31,24 +30,18 @@ func Test_eventBuffer_QueueEvent(t *testing.T) {
 		}
 	}
 	// Verify data queued in expected order
-	if buffer.List.Len() != 3 {
-		t.Errorf("eventBuffer list length was: %d, expected: %d.", buffer.List.Len(), 3)
+	if len(buffer.buffer) != 3 {
+		t.Errorf("eventBuffer list length was: %d, expected: %d.", len(buffer.buffer), 3)
 	}
+
 	eventIndex := 0
-	// NOTE how list stores recently queued at the front, so iterate in reverse
-	// to get chronological order (oldest first)
-	for element := buffer.List.Back(); element != nil; element = element.Prev() {
-		// Make sure converts back to Event
-		event, ok := element.Value.(*Event)
-		if !ok {
-			t.Errorf("Found non-event type in event buffer at index %d.", eventIndex)
+
+	for i := 0; i < len(buffer.buffer); i++ {
+		if buffer.buffer[i] != events[eventIndex] {
+			t.Errorf("eventBuffer list element %d was: %q, expected: %q.",
+				i, buffer.buffer[i], events[eventIndex])
 		}
-		// Make sure is event we think it should be
-		if event != events[eventIndex] {
-			t.Errorf("Wrong event at index %d.  Expected: %q, Actual %q.",
-				eventIndex, events[eventIndex], event)
-		}
-		eventIndex += 1
+		eventIndex++
 	}
 }
 
@@ -57,7 +50,7 @@ func Test_eventBuffer_QueueEvent_MaxBufferReached(t *testing.T) {
 	max := 10         // how large our buffer is
 	moreThanMax := 55 // how many events to queue
 	buffer := eventBuffer{
-		list.New(),
+		make([]*Event, 0),
 		max, // max buffer size
 		timeToEpochMilliseconds(testStart),
 	}
@@ -80,8 +73,8 @@ func Test_eventBuffer_QueueEvent_MaxBufferReached(t *testing.T) {
 		}
 	}
 	// Verify that the last max-many events are what's left in the buffer
-	if buffer.List.Len() != max {
-		t.Errorf("eventBuffer list length was: %d, expected: %d.", buffer.List.Len(), max)
+	if len(buffer.buffer) != max {
+		t.Errorf("eventBuffer list length was: %d, expected: %d.", len(buffer.buffer), max)
 	}
 	// Oldest event time should be the timestamp of the last event in the buffer
 	// which is event index 45 since 55 were added but our max buffer caps at
@@ -93,25 +86,19 @@ func Test_eventBuffer_QueueEvent_MaxBufferReached(t *testing.T) {
 	// we should see only the last max-many items, so start our comparison
 	// offset at that point:
 	eventIndex := moreThanMax - max
-	for element := buffer.List.Back(); element != nil; element = element.Prev() {
-		// Make sure converts back to Event
-		event, ok := element.Value.(*Event)
-		if !ok {
-			t.Errorf("Found non-event type in event buffer at index %d.", eventIndex)
+	for i := 0; i < len(buffer.buffer); i++ {
+		if buffer.buffer[i] != events[eventIndex] {
+			t.Errorf("eventBuffer list element %d was: %q, expected: %q.",
+				i, buffer.buffer[i], events[eventIndex])
 		}
-		// Make sure is event we think it should be
-		if event != events[eventIndex] {
-			t.Errorf("Wrong event at index %d.  Expected: %q, Actual %q.",
-				eventIndex, events[eventIndex], event)
-		}
-		eventIndex += 1
+		eventIndex++
 	}
 }
 
 func Test_eventBuffer_QueueEvent_InvalidInput(t *testing.T) {
 	testStart := time.Now()
 	buffer := eventBuffer{
-		list.New(),
+		make([]*Event, 0),
 		10, // max buffer size
 		timeToEpochMilliseconds(testStart),
 	}
@@ -120,9 +107,9 @@ func Test_eventBuffer_QueueEvent_InvalidInput(t *testing.T) {
 		t.Errorf(
 			"Event queue succeeded when it shouldn't have. Tried to queue nil.")
 	}
-	if buffer.List.Len() != 0 {
+	if len(buffer.buffer) != 0 {
 		t.Errorf("Event list was modified after a failed queue.  "+
-			"Expected len: 0, got: %d", buffer.List.Len())
+			"Expected len: 0, got: %d", len(buffer.buffer))
 	}
 	// this value should remain unchanged:
 	if buffer.oldestEventTime != timeToEpochMilliseconds(testStart) {
@@ -134,7 +121,7 @@ func Test_eventBuffer_QueueEvent_InvalidInput(t *testing.T) {
 func Test_eventBuffer_GetEventsSince(t *testing.T) {
 	testStart := time.Now()
 	buffer := eventBuffer{
-		list.New(),
+		make([]*Event, 0),
 		10, // max buffer size
 		timeToEpochMilliseconds(testStart),
 	}
@@ -182,11 +169,12 @@ func Test_eventBuffer_GetEventsSince(t *testing.T) {
 
 // Tests the new, optional (can be nil) lastEventUUID argument
 // that was added to fix issue #19.
+//
 //gocyclo:ignore
 func Test_eventBuffer_GetEventsSince_lastEventUUID(t *testing.T) {
 	testStart := time.Now()
 	buffer := eventBuffer{
-		list.New(),
+		make([]*Event, 0),
 		10, // max buffer size
 		timeToEpochMilliseconds(testStart),
 	}
@@ -332,7 +320,7 @@ func Test_eventBuffer_GetEventsSince_deleteFetchedEvents(t *testing.T) {
 	// and confirm fetched events were removed
 	testStart := time.Now()
 	buffer := eventBuffer{
-		list.New(),
+		make([]*Event, 0),
 		10, // max buffer size
 		timeToEpochMilliseconds(testStart),
 	}
@@ -382,21 +370,21 @@ func Test_eventBuffer_GetEventsSince_deleteFetchedEvents(t *testing.T) {
 			buffer.oldestEventTime, testStart)
 	}
 	// Now confirm that the buffer had thos events removed:
-	if buffer.List.Len() != 2 {
+	if len(buffer.buffer) != 2 {
 		t.Errorf("buffer had unexpected number of events.  was: %d, expected: %d.",
-			buffer.List.Len(), 2)
+			len(buffer.buffer), 2)
 	}
-	if buffer.List.Front().Value.(*Event) != events[1] {
+	if buffer.buffer[len(buffer.buffer)-1] != events[1] {
 		t.Errorf("buffer had unexpected event at front. expected events[1].")
 	}
-	if buffer.List.Front().Next().Value.(*Event) != events[0] {
+	if buffer.buffer[len(buffer.buffer)-2] != events[0] {
 		t.Errorf("buffer had unexpected event at second item. expected events[0].")
 	}
 }
 
 func Test_eventBuffer_GetEventsSince_AllEvents(t *testing.T) {
 	buffer := eventBuffer{
-		list.New(),
+		make([]*Event, 0),
 		10, // max buffer size
 		timeToEpochMilliseconds(time.Now()),
 	}
@@ -433,7 +421,7 @@ func Test_eventBuffer_GetEventsSince_AllEvents(t *testing.T) {
 
 func Test_eventBuffer_GetEventsSince_NoEvents(t *testing.T) {
 	buffer := eventBuffer{
-		list.New(),
+		make([]*Event, 0),
 		10, // max buffer size
 		timeToEpochMilliseconds(time.Now()),
 	}
@@ -464,7 +452,7 @@ func Test_eventBuffer_GetEventsSince_NoEvents(t *testing.T) {
 
 func Test_eventBuffer_GetEventsSince_EmptyBuffer(t *testing.T) {
 	buffer := eventBuffer{
-		list.New(),
+		make([]*Event, 0),
 		10, // max buffer size
 		timeToEpochMilliseconds(time.Now()),
 	}
@@ -481,28 +469,10 @@ func Test_eventBuffer_GetEventsSince_EmptyBuffer(t *testing.T) {
 	}
 }
 
-func Test_eventBuffer_GetEventsSince_InvalidItems(t *testing.T) {
-	buffer := eventBuffer{
-		list.New(),
-		10, // max buffer size
-		timeToEpochMilliseconds(time.Now()),
-	}
-	buffer.List.PushBack("some string.  clearly not an Event type")
-	events, err := buffer.GetEventsSince(time.Now(), false, nil)
-	// This buffer is hosed because there is non-Event data in it.
-	// All calls to GetEventsSince should fail.
-	if err == nil {
-		t.Fatalf("Expected non-nil error, got nil")
-	}
-	if len(events) != 0 {
-		t.Fatalf("Expected empty events, got len: %d", len(events))
-	}
-}
-
 func Test_eventBuffer_DeleteEventsOlderThan_Trivial(t *testing.T) {
 	testStart := time.Now()
 	buffer := eventBuffer{
-		list.New(),
+		make([]*Event, 0),
 		10, // max buffer size
 		timeToEpochMilliseconds(testStart),
 	}
@@ -511,34 +481,15 @@ func Test_eventBuffer_DeleteEventsOlderThan_Trivial(t *testing.T) {
 	if err != nil {
 		t.Errorf("DeleteEventsOlderThan returned non-nil error: %v", err)
 	}
-	if buffer.List.Len() != 0 {
-		t.Errorf("Expected empty list, got %d items in list.", buffer.List.Len())
-	}
-}
-
-func Test_eventBuffer_DeleteEventsOlderThan_InvalidData(t *testing.T) {
-	testStart := time.Now()
-	buffer := eventBuffer{
-		list.New(),
-		10, // max buffer size
-		timeToEpochMilliseconds(testStart),
-	}
-	// Corrupt list by adding something that is not an Event:
-	buffer.List.PushBack("asdf")
-	// Confirm calls to operate on this list are now errors
-	err := buffer.DeleteEventsOlderThan(timeToEpochMilliseconds(testStart.Add(1 * time.Second)))
-	if err == nil {
-		t.Errorf("DeleteEventsOlderThan returned nil error when non-nil error was expected.")
-	}
-	if buffer.List.Len() != 1 {
-		t.Errorf("Expected 1 item list, got %d items in list.", buffer.List.Len())
+	if len(buffer.buffer) != 0 {
+		t.Errorf("Expected empty list, got %d items in list.", len(buffer.buffer))
 	}
 }
 
 func Test_eventBuffer_DeleteEventsOlderThan(t *testing.T) {
 	testStart := time.Now()
 	buffer := eventBuffer{
-		list.New(),
+		make([]*Event, 0),
 		10, // max buffer size
 		timeToEpochMilliseconds(testStart),
 	}
@@ -564,9 +515,9 @@ func Test_eventBuffer_DeleteEventsOlderThan(t *testing.T) {
 		t.Errorf("Unexpected error during DeleteEventsOlderThan: %v", err)
 	}
 	// No events removed
-	if buffer.List.Len() != len(events) {
+	if len(buffer.buffer) != len(events) {
 		t.Errorf("Unexpected number of events left in buffer. was: %d, expected: %d.",
-			buffer.List.Len(), len(events))
+			len(buffer.buffer), len(events))
 	}
 	// oldestEventTime unchanged
 	if buffer.oldestEventTime != events[0].Timestamp {
@@ -580,14 +531,14 @@ func Test_eventBuffer_DeleteEventsOlderThan(t *testing.T) {
 		t.Errorf("Unexpected error during DeleteEventsOlderThan: %v", err)
 	}
 	// Oldest 2 events removed
-	if buffer.List.Len() != 3 {
+	if len(buffer.buffer) != 3 {
 		t.Errorf("Unexpected number of events left in buffer. was: %d, expected: %d.",
-			buffer.List.Len(), 3)
+			len(buffer.buffer), 3)
 	}
 	// oldestEventTime updated to the oldest event that is now in buffer
 	if buffer.oldestEventTime != events[2].Timestamp {
 		t.Errorf("eventBuffer.oldestEventTime was: %v, expected: %v.",
-			buffer.oldestEventTime, testStart)
+			buffer.oldestEventTime, events[2].Timestamp)
 	}
 
 	// Scenario 3: ask to delete older than some time newer than all events,
@@ -598,15 +549,15 @@ func Test_eventBuffer_DeleteEventsOlderThan(t *testing.T) {
 		t.Errorf("Unexpected error during DeleteEventsOlderThan: %v", err)
 	}
 	// Remaining 3 events removed
-	if buffer.List.Len() != 0 {
+	if len(buffer.buffer) != 0 {
 		t.Errorf("Unexpected number of events left in buffer. was: %d, expected: %d.",
-			buffer.List.Len(), 0)
+			len(buffer.buffer), 0)
 	}
 	// as events are removed oldestEventTime is set to the next event,
 	// so now that we're empty, our oldestEventTime member just mirrors the
 	// oldest event that was removed
 	if buffer.oldestEventTime != events[4].Timestamp {
 		t.Errorf("eventBuffer.oldestEventTime was: %v, expected: %v.",
-			buffer.oldestEventTime, testStart)
+			buffer.oldestEventTime, events[4].Timestamp)
 	}
 }

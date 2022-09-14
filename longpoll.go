@@ -48,16 +48,6 @@ type LongpollManager struct {
 	// directly or wrapped within another handler function that adds additional
 	// behavior like authentication or business logic.
 	SubscriptionHandler func(w http.ResponseWriter, r *http.Request)
-	// PublishHandler is an Http handler function that can be served directly
-	// or wrapped within another handler function that adds additional
-	// behavior like authentication or business logic. If one does not want
-	// to expose the PublishHandler, and instead only publish via
-	// LongpollManager.Publish(), then simply don't serve this handler.
-	// NOTE: this default publish handler does not enforce anything like what
-	// category or data is allowed. It is entirely permissive by default.
-	// For more production-type uses, wrap this with a http handler that
-	// limits what can be published.
-	PublishHandler func(w http.ResponseWriter, r *http.Request)
 	// flag whether or not StartLongpoll has been called
 	started bool
 	// flag whether or not LongpollManager.Shutdown has been called--enforces
@@ -302,7 +292,6 @@ func StartLongpoll(opts Options) (*LongpollManager, error) {
 			clientRequestChan, clientTimeoutChan, opts.Logger.WithField("func", "subscriptionHandler")),
 		started: true,
 	}
-	lpManager.PublishHandler = getLongPollPublishHandler(&lpManager)
 	return &lpManager, nil
 }
 
@@ -344,61 +333,6 @@ type PublishData struct {
 	Data     interface{} `json:"data"`
 }
 
-func getLongPollPublishHandler(manager *LongpollManager) func(w http.ResponseWriter, r *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		logger := manager.subManager.Logger.WithField("func", "PublishHandler")
-
-		if r.Method != http.MethodPost {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			fmt.Fprintf(w, "{\"error\": \"Invalid HTTP Method. Only POST allowed.\"}")
-			logger.Warnf("Invalid HTTP method: %v, only POST allowed.\n", r.Method)
-			return
-		}
-
-		decoder := json.NewDecoder(r.Body)
-		var pubData PublishData
-		err := decoder.Decode(&pubData)
-		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, "{\"error\": \"Invalid POST body json.\"}")
-			logger.Warnf("Invalid post body json, error: %v\n", err)
-			return
-		}
-
-		if len(pubData.Category) == 0 || len(pubData.Category) > 1024 {
-			w.WriteHeader(http.StatusBadRequest)
-			io.WriteString(w, "{\"error\": \"Invalid or missing 'category' arg, must be 1-1024 characters long.\"}")
-			logger.Warnf("Invalid or missing subscription 'category', must be 1-1024 characters long.")
-			return
-		}
-
-		if pubData.Data == nil {
-			w.WriteHeader(http.StatusBadRequest)
-			logger.Warnf("Invalid or missing publish data. Must be non-nil.")
-			io.WriteString(w, "{\"error\": \"Invalid or missing 'data' arg, must be non-nil.\"}")
-			return
-		}
-
-		uid, err := uuid.NewV4()
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			logger.Errorf("Failed to generate UUID for event, error: %v\n", err)
-			io.WriteString(w, "{\"error\": \"Failed to generate UUID for event.\"}")
-			return
-		}
-		manager.Publish(&Event{
-			Timestamp: timeToEpochMilliseconds(time.Now()),
-			Data:      pubData.Data,
-			ID:        uid,
-			Category:  pubData.Category,
-		})
-		w.WriteHeader(http.StatusOK)
-		io.WriteString(w, "{\"success\": true}")
-	}
-}
-
 // get web handler that has closure around sub chanel and clientTimeout channnel
 func getLongPollSubscriptionHandler(maxTimeoutSeconds int, subscriptionRequests chan *clientSubscription,
 	clientTimeouts chan<- *clientCategoryPair, logger logrus.FieldLogger) func(w http.ResponseWriter, r *http.Request) {
@@ -414,10 +348,8 @@ func getLongPollSubscriptionHandler(maxTimeoutSeconds int, subscriptionRequests 
 		}
 
 		// We are going to return json no matter what:
-		//		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Connection", "Keep-Alive")
-		w.Header().Set("X-Content-Type-Options", "nosniff")
 		// Don't cache response:
 		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate") // HTTP 1.1.
 		w.Header().Set("Pragma", "no-cache")                                   // HTTP 1.0.
@@ -506,8 +438,7 @@ func getLongPollSubscriptionHandler(maxTimeoutSeconds int, subscriptionRequests 
 				}
 				return
 			case events := <-eventsChannel:
-				// Consume event.  Subscription manager will automatically discard
-				// this client's channel upon sending event
+				// Consume event.
 				// NOTE: event is actually []Event
 				if jsonData, err := json.Marshal(eventResponse{events}); err == nil {
 					io.WriteString(w, string(jsonData)+"\n")

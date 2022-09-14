@@ -2,7 +2,6 @@ package golongpoll
 
 import (
 	"container/heap"
-	"container/list"
 	"fmt"
 	"time"
 
@@ -133,15 +132,17 @@ func (sm *subscriptionManager) handleNewClient(newClient *clientSubscription) er
 		// First clean up anything that expired
 		sm.checkExpiredEvents(expiringBuf)
 		// We have a buffer for this sub category, check for buffered events
-		if events, err := expiringBuf.eventBufferPtr.GetEventsSince(newClient.LastEventTime,
-			sm.DeleteEventAfterFirstRetrieval, newClient.LastEventID); err == nil && len(events) > 0 {
+		events, err := expiringBuf.eventBufferPtr.GetEventsSince(newClient.LastEventTime,
+			sm.DeleteEventAfterFirstRetrieval, newClient.LastEventID)
+		logger.Infof("Sending %d events to client %s (last event time: %s)", len(events), newClient.ClientUUID.String(), newClient.LastEventTime)
+		if err == nil && len(events) > 0 {
 			logger.Debugf("Skip adding client, sending %d events. (Category: %q Client: %s)\n",
 				len(events), newClient.SubscriptionCategory, newClient.ClientUUID.String())
 			// Send client buffered events.  Client will immediately consume
 			// and end long poll request, so no need to have manager store
 			newClient.Events <- events
 		} else if err != nil {
-			funcErr = fmt.Errorf("Error getting events from event buffer: %s.\n", err)
+			funcErr = fmt.Errorf("error getting events from event buffer: %s\n", err)
 			logger.Errorf("Error getting events from event buffer: %s.\n", err)
 		}
 		// Buffer Could have been emptied due to the  DeleteEventAfterFirstRetrieval
@@ -216,17 +217,6 @@ func (sm *subscriptionManager) handleNewEvent(newEvent *Event) error {
 			logger.Debugf("Sending event to client: %s\n", clientUUID.String())
 			clientChan <- []*Event{newEvent}
 		}
-		// Remove all client subscriptions since we just sent all the
-		// clients an event.  In longpolling, subscriptions only last
-		// until there is data (which just got sent) or a timeout
-		// (which is handled by the disconnect case).
-		// Doing this also keeps the subscription map lean in the event
-		// of many different subscription categories, we don't keep the
-		// trivial/empty map entries.
-		logger.Debugf("Removing %d client subscriptions for: %s\n",
-			len(clients), newEvent.Category)
-		// DO NOT delete here, we want to keep publishing for the client
-		//delete(sm.ClientSubChannels, newEvent.Category)
 	} // else no client subscriptions
 
 	expiringBuf, bufFound := sm.SubEventBuffer[newEvent.Category]
@@ -235,7 +225,7 @@ func (sm *subscriptionManager) handleNewEvent(newEvent *Event) error {
 		if !bufFound {
 			nowMs := timeToEpochMilliseconds(time.Now())
 			buf := &eventBuffer{
-				list.New(),
+				make([]*Event, 0),
 				sm.MaxEventBufferSize,
 				nowMs,
 			}
@@ -282,7 +272,7 @@ func (sm *subscriptionManager) checkExpiredEvents(expiringBuf *expiringBuffer) e
 }
 
 func (sm *subscriptionManager) deleteBufferIfEmpty(expiringBuf *expiringBuffer, category string) error {
-	if expiringBuf.eventBufferPtr.List.Len() == 0 {
+	if len(expiringBuf.eventBufferPtr.buffer) == 0 {
 		sm.Logger.WithField("func", "deleteBufferIfEmpty").Debugf("Deleting empty eventBuffer for category: %q\n", category)
 		delete(sm.SubEventBuffer, category)
 		sm.priorityQueueUpdateDeletedBuffer(expiringBuf)
