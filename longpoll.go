@@ -338,7 +338,7 @@ func getLongPollSubscriptionHandler(maxTimeoutSeconds int, subscriptionRequests 
 	clientTimeouts chan<- *clientCategoryPair, logger logrus.FieldLogger) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		timeout, err := strconv.Atoi(r.URL.Query().Get("timeout"))
-		logger.Debugf("Handling HTTP request at ", r.URL)
+		logger.Debugf("Handling HTTP request at %s", r.URL)
 
 		flusher, ok := w.(http.Flusher)
 		if !ok {
