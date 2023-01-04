@@ -198,3 +198,7 @@ func (eb *eventBuffer) DeleteExpiredEvents(olderThanTimeMs int64) error {
 
 	return nil
 }
+
+func (eb *eventBuffer) Len() int {
+	return len(eb.buffer)
+}

@@ -73,6 +73,7 @@ func (sm *subscriptionManager) run() error {
 			sm.handleDeletedEvent(deletedEvent)
 		case <-time.After(time.Duration(5) * time.Second):
 			sm.seeIfTimeToPurgeStaleCategories()
+			sm.UpdateMetrics()
 		case _ = <-sm.Quit:
 			logger.Info("Received quit signal, stopping.")
 
@@ -101,6 +102,12 @@ func (sm *subscriptionManager) run() error {
 			// break out of our infinite loop/select
 			return nil
 		}
+	}
+}
+
+func (sm *subscriptionManager) UpdateMetrics() {
+	for category, eventBuffer := range sm.SubEventBuffer {
+		EventsInQueue.WithLabelValues(category).Set(float64(eventBuffer.eventBufferPtr.Len()))
 	}
 }
 

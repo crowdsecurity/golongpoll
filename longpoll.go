@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
 
 	"github.com/gofrs/uuid"
@@ -80,6 +81,8 @@ func (m *LongpollManager) Publish(event *Event) error {
 	if event.ID == uuid.Nil {
 		return errors.New("event UUID cannot be empty")
 	}
+
+	EventsInQueue.With(prometheus.Labels{"category": event.Category}).Inc()
 
 	m.eventsIn <- event
 	return nil
@@ -208,6 +211,7 @@ func StartLongpoll(opts Options) (*LongpollManager, error) {
 		opts.Logger = logrus.New().WithField("component", "longpoll")
 	}
 
+	prometheus.MustRegister(EventsInQueue)
 	channelSize := 100
 	clientRequestChan := make(chan *clientSubscription, channelSize)
 	clientTimeoutChan := make(chan *clientCategoryPair, channelSize)
