@@ -414,7 +414,12 @@ func getLongPollSubscriptionHandler(maxTimeoutSeconds int, subscriptionRequests 
 			io.WriteString(w, "{\"error\": \"Error creating new Subscription.\"}")
 			return
 		}
+
+		var categories []string
+		clientUUID := (*subscriptions)[0].clientCategoryPair.ClientUUID.String()
+
 		for _, subscription := range *subscriptions {
+			categories = append(categories, subscription.SubscriptionCategory)
 			subscriptionRequests <- subscription
 		}
 		// Listens for connection close and un-register subscription in the
@@ -440,6 +445,12 @@ func getLongPollSubscriptionHandler(maxTimeoutSeconds int, subscriptionRequests 
 			case events := <-eventsChannel:
 				// Consume event.
 				// NOTE: event is actually []Event
+				logger.WithFields(
+					logrus.Fields{
+						"client_uuid": clientUUID,
+						"categories":  categories,
+					},
+				).Infof("Sending events %d events to client", len(events))
 				if jsonData, err := json.Marshal(eventResponse{events}); err == nil {
 					io.WriteString(w, string(jsonData)+"\n")
 					flusher.Flush()
